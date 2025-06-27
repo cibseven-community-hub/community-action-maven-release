@@ -1,6 +1,6 @@
 ---
-name: Release Camunda Community Project on Maven Central
-description: Encapsulates the release process of Camunda community extensions
+name: Release CIB seven Community Project on Maven Central
+description: Encapsulates the release process of CIB seven community extensions
 
 inputs:
   artifacts-pattern:
@@ -35,15 +35,11 @@ inputs:
       Please refer to the documentation for migration guidance: https://github.com/camunda-community-hub/community/blob/main/maintainers-reviewers/RELEASE.MD#migration-to-sonatype-central-portal--how-to
     required: false
     default: "central-sonatype-publish"
-  camunda-release-profile:
-    description: Maven profile to be selected for configuring Camunda Artifactory release; typically "camunda-repository".
-    required: false
-    default: "camunda-repository"
   nexus-usr:
-    description: Camunda Nexus username
+    description: CIB seven Nexus username
     required: true
   nexus-psw:
-    description: Camunda Nexus password
+    description: CIB seven Nexus password
     required: true
   sonatype-central-portal-usr:
     description: Sonatype Central Portal username
@@ -51,22 +47,6 @@ inputs:
   sonatype-central-portal-psw:
     description: Sonatype Central Portal password (User Token)
     required: true
-  maven-usr:
-    description: Maven Central username
-    deprecationMessage: |
-      This parameter is deprecated since @v2 and will be removed in @v3 due to migration to the new Sonatype's Central Portal.
-      It is ignored if the new `central-sonatype-publish` profile is used.
-
-      Please refer to the documentation for migration guidance: https://github.com/camunda-community-hub/community/blob/main/maintainers-reviewers/RELEASE.MD#migration-to-sonatype-central-portal--how-to
-    required: false
-  maven-psw:
-    description: Maven Central password
-    deprecationMessage: |
-      This parameter is deprecated since @v2 and will be removed in @v3 due to migration to the new Sonatype's Central Portal.
-      It is ignored if the new `central-sonatype-publish` profile is used.
-
-      Please refer to the documentation for migration guidance: https://github.com/camunda-community-hub/community/blob/main/maintainers-reviewers/RELEASE.MD#migration-to-sonatype-central-portal--how-to
-    required: false
   maven-gpg-passphrase:
     description: GPG passphrase used to unlock the signing key
     required: true
@@ -85,14 +65,6 @@ inputs:
     description: Vulnerability scanning using Aqua Security Trivy
     required: false
     default: "false"
-  maven-url:
-    description: URL of Maven Central/Sonatype, e.g. newer domains are hosted under s01.oss.sonatype.org
-    deprecationMessage: |
-      This parameter is deprecated since @v2 and will be removed in @v3 due to migration to the new Sonatype's Central Portal.
-      It is ignored if the new `central-sonatype-publish` profile is used.
-
-      Please refer to the documentation for migration guidance: https://github.com/camunda-community-hub/community/blob/main/maintainers-reviewers/RELEASE.MD#migration-to-sonatype-central-portal--how-to
-    default: "oss.sonatype.org"
   branch:
     description: Branch on which the new version numbers will be committed
     required: false
@@ -111,7 +83,6 @@ runs:
       shell: bash
       env:
         CENTRAL_RELEASE_PROFILE: ${{ inputs.central-release-profile }}
-        DEPRECATED_RELEASE_PROFILE_IN_V1: oss-maven-central
         NEW_RELEASE_PROFILE_SINCE_V2: central-sonatype-publish
         MAVEN_USR: ${{ inputs.maven-usr }}
         MAVEN_PSW: ${{ inputs.maven-psw }}
@@ -129,11 +100,6 @@ runs:
             "(the new publishing interface for Maven Central)."
           echo "Please upgrade your parent POM to the latest major version that includes this profile and refer to the documentation for migration guidance: " \
             "https://github.com/camunda-community-hub/community/blob/main/maintainers-reviewers/RELEASE.MD#migration-to-sonatype-central-portal--how-to"
-        # Warn if the deprecated profile is still being used for publishing to Maven Central
-        elif [[ "$CENTRAL_RELEASE_PROFILE" == "$DEPRECATED_RELEASE_PROFILE_IN_V1" ]]; then
-          echo "::warning::You are using the deprecated release profile '$CENTRAL_RELEASE_PROFILE'. " \
-            "Due to migration to Sonatype's Central Portal, please switch to the new profile '$NEW_RELEASE_PROFILE_SINCE_V2' and to @v2 of this action. " \
-            "Refer to the documentation for migration guidance: https://github.com/camunda-community-hub/community/blob/main/maintainers-reviewers/RELEASE.MD#migration-to-sonatype-central-portal--how-to"
         fi
 
         {

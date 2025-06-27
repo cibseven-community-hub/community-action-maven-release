@@ -25,8 +25,13 @@
   </profiles>
 
   <servers>
-      <server>
-          <id>camunda-nexus</id>
+        <server>
+          <id>mvn-cibseven-community</id>
+          <username>${env.NEXUS_USR}</username>
+          <password>${env.NEXUS_PSW}</password>
+        </server>
+        <server>
+          <id>mvn-cibseven-community-snapshots</id>
           <username>${env.NEXUS_USR}</username>
           <password>${env.NEXUS_PSW}</password>
         </server>
