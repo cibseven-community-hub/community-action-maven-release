@@ -78,55 +78,14 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Check release profile for Maven Central
-      id: maven-central
-      shell: bash
-      env:
-        CENTRAL_RELEASE_PROFILE: ${{ inputs.central-release-profile }}
-        NEW_RELEASE_PROFILE_SINCE_V2: central-sonatype-publish
-        MAVEN_USR: ${{ inputs.maven-usr }}
-        MAVEN_PSW: ${{ inputs.maven-psw }}
-        SONATYPE_CENTRAL_PORTAL_USR: ${{ inputs.sonatype-central-portal-usr }}
-        SONATYPE_CENTRAL_PORTAL_PSW: ${{ inputs.sonatype-central-portal-psw }}
-      run: |-
-        # Retrieve all available Maven profiles from the current project
-        profiles=$(mvn help:all-profiles)
-
-        # Warn if the new profile is missing, user might be on an outdated parent POM
-        if ! echo "$profiles" | grep -q "$NEW_RELEASE_PROFILE_SINCE_V2"; then
-          echo "::warning::The Maven profile '$NEW_RELEASE_PROFILE_SINCE_V2' is not available. " \
-            "This suggests you are using an outdated parent POM."
-          echo "This new profile is required to support publishing via Sonatype's Central Portal " \
-            "(the new publishing interface for Maven Central)."
-          echo "Please upgrade your parent POM to the latest major version that includes this profile and refer to the documentation for migration guidance: " \
-            "https://github.com/camunda-community-hub/community/blob/main/maintainers-reviewers/RELEASE.MD#migration-to-sonatype-central-portal--how-to"
-        fi
-
-        {
-          echo release-profile="${CENTRAL_RELEASE_PROFILE}"
-          echo user="${SONATYPE_CENTRAL_PORTAL_USR}"
-          echo password="${SONATYPE_CENTRAL_PORTAL_PSW}"
-        } >> $GITHUB_OUTPUT
-
-    - name: Initialize
-      shell: bash
-      run: |-
-        echo "Repo: ${GITHUB_REPOSITORY}"
-        git config --global user.name "Release Bot"
-        git config --global user.email "actions@github.com"
-        test -n "${{inputs.release-profile}}" && echo 'RELEASE_PROFILE=-P${{inputs.release-profile}}' >> "$GITHUB_ENV"
-        test -n "${{steps.maven-central.outputs.release-profile}}" && echo 'CENTRAL_RELEASE_PROFILE=-P${{steps.maven-central.outputs.release-profile}}' >> "$GITHUB_ENV"
-        test -n "${{inputs.camunda-release-profile}}" && echo 'CAMUNDA_RELEASE_PROFILE=-P${{inputs.camunda-release-profile}}' >> "$GITHUB_ENV"
-        cp -v "${{ github.action_path }}/resources/settings.xml" "$HOME/.m2/"
-
-    - name: Run maven
+    - name: Build
       shell: bash
       run: |-
         test -z "${{ inputs.run-tests }}" && SKIP_TESTS="-DskipTests"
         mvn -B ${{ inputs.maven-additional-options }} ${{ inputs.maven-build-options }} package ${SKIP_TESTS}
 
     - name: Archive Test Results on Failure
-      if: ${{ inputs.run-tests && failure() }}
+      if: ${{+ && failure() }}
       uses: actions/upload-artifact@v4
       with:
         name: test-results
@@ -177,56 +136,52 @@ runs:
       with:
         publish_latest_tag: true
 
-    - name: Publish SNAPSHOT
+    
+    - name: Deploy to artifacts.cibseven.org only
+      if: inputs.deploy-to-artifacts == 'true' && inputs.deploy-to-maven-central == 'false'
       env:
-        NEXUS_USR: ${{ inputs.nexus-usr}}
+        NEXUS_USR: ${{ inputs.nexus-usr }}
         NEXUS_PSW: ${{ inputs.nexus-psw }}
-        MAVEN_USR: ${{ steps.maven-central.outputs.user }}
-        MAVEN_PSW: ${{ steps.maven-central.outputs.password }}
+      shell: bash
+      run: |-
+        echo "::group::Deploy to artifacts.cibseven.org"
+        mvn -T4 -U -DskipTests clean deploy
+        echo "::endgroup::"
+
+    - name: Deploy to Maven Central (Release only)
+      if: inputs.deploy-to-maven-central == 'true'
+      env:
+        NEXUS_USR: ${{ inputs.nexus-usr }}
+        NEXUS_PSW: ${{ inputs.nexus-psw }}
         MAVEN_GPG_PASSPHRASE: ${{ inputs.maven-gpg-passphrase }}
       shell: bash
       run: |-
-        echo "::group::Publish SNAPSHOT"
-        test -n "${{ inputs.release-version }}" && echo "::debug::Not publishing SNAPSHOT because release-version is set" && exit 0
+        echo "::group::Deploy to Maven Central"
+        # Check if version is SNAPSHOT
+        VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+        if [[ "$VERSION" == *-SNAPSHOT ]]; then
+          echo "::warning::Cannot deploy SNAPSHOT version to Maven Central"
+          exit 1
+        fi
 
-        echo "Publish SNAPSHOT to Camunda Artifactory using profiles ${{inputs.release-profile}}, ${{inputs.camunda-release-profile}}"
-        mvn -B --no-transfer-progress ${{ inputs.maven-additional-options }} -DskipTests ${{ inputs.maven-release-options }} \
-          ${RELEASE_PROFILE} ${CAMUNDA_RELEASE_PROFILE} deploy
+        # Get GPG key name
+        GPG_KEYNAME=$(gpg --list-keys --with-colons | grep pub | cut -d: -f5)
 
-        # nexusUrl is ignored if the new `central-sonatype-publish` profile is used
-        # to be removed in @v3
-        echo "Publish SNAPSHOT to Maven Central using profiles ${{inputs.release-profile}}, ${{steps.maven-central.outputs.release-profile}}"
-        mvn -B --no-transfer-progress ${{ inputs.maven-additional-options }} -DskipTests ${{ inputs.maven-release-options }} \
-          -DnexusUrl="https://${{inputs.maven-url}}/" \
-          ${RELEASE_PROFILE} ${CENTRAL_RELEASE_PROFILE} deploy
+        # Deploy to Maven Central
+        mvn -T4 -U \
+          -Dgpg.keyname="${GPG_KEYNAME}" \
+          -Dgpg.passphrase="${MAVEN_GPG_PASSPHRASE}" \
+          clean deploy \
+          -Psonatype-oss-release \
+          -Dskip.cibseven.release="${{ inputs.deploy-to-artifacts != 'true' }}"
+        echo "::endgroup::"
 
-    - name: Publish Maven Release
-      env:
-        NEXUS_USR: ${{ inputs.nexus-usr}}
-        NEXUS_PSW: ${{ inputs.nexus-psw }}
-        MAVEN_USR: ${{ steps.maven-central.outputs.user }}
-        MAVEN_PSW: ${{ steps.maven-central.outputs.password }}
-        MAVEN_GPG_PASSPHRASE: ${{ inputs.maven-gpg-passphrase }}
+    - name: Skip if manual deployment was selected
+      if: inputs.deploy-to-artifacts == 'true' || inputs.deploy-to-maven-central == 'true'
       shell: bash
       run: |-
-        echo "::group::Publish RELEASE"
-        test -z "${{ inputs.release-version }}" && echo "::debug::Skipping Release because release-version is unset" && exit 0
-
-        echo "Set version to ${{ inputs.release-version }}"
-        mvn -B ${{ inputs.maven-additional-options }} versions:set org.codehaus.mojo:versions-maven-plugin:2.8.1:update-child-modules \
-         -DnewVersion=${{ inputs.release-version }}
-
-        echo "Deploy release to Camunda Repository using profiles ${{inputs.release-profile}}, ${{inputs.camunda-release-profile}}"
-        mvn -B --no-transfer-progress ${{ inputs.maven-additional-options }} -DskipTests ${{ inputs.maven-release-options }} \
-          ${RELEASE_PROFILE} ${CAMUNDA_RELEASE_PROFILE} deploy
-
-        # nexusUrl is ignored if the new `central-sonatype-publish` profile is used
-        # to be removed in @v3
-        echo "Deploy release to Maven Central using profiles ${{inputs.release-profile}}, ${{steps.maven-central.outputs.release-profile}}"
-        mvn -B --no-transfer-progress ${{ inputs.maven-additional-options }} -DskipTests ${{ inputs.maven-release-options }} \
-          -DautoReleaseAfterClose=${{ inputs.maven-auto-release-after-close }} \
-          -DnexusUrl="https://${{inputs.maven-url}}/" \
-          ${RELEASE_PROFILE} ${CENTRAL_RELEASE_PROFILE} deploy
+        echo "::notice::Skipping standard SNAPSHOT/Release deployment because manual deployment option was selected"
+        exit 0 
 
     - name: Prepare next development version
       shell: bash
