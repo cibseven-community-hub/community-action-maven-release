@@ -1,0 +1,287 @@
+---
+name: Release CIB seven Community Project on Maven Central
+description: Encapsulates the release process of CIB seven community extensions
+
+inputs:
+  artifacts-pattern:
+    description: Which artifacts to store. Set to empty string to disable
+    required: false
+    default: ./target/nexus-staging/**/*.jar
+  run-tests:
+    default: ""
+    required: false
+    description: Wether to explicitly run maven tests prior to releasing
+  maven-additional-options:
+    description: Any extra Maven options
+    required: false
+    default: ""
+  maven-release-options:
+    description: Any extra Maven options for the release process (-DskipTests is already implied).
+    required: false
+    default: ""
+  release-version:
+    description: Release Version (usually tag name). If empty, a SNAPSHOT (with the currently configured version) will be deployed.
+    required: false
+    default: "latest"
+  release-profile: # deprecated
+    description: Maven profile to be selected for the building release artifacts; typically "community-action-maven-release".
+    required: false
+    default: "community-action-maven-release"
+  community-deployment-activation:
+    description: Maven property to activate maven profile so that deployment is done in community nexus repositories
+    required: false
+    default: "Community"
+  central-release-profile:
+    description: |
+      Maven profile to configure the Maven Central release; typically set to "sonatype-oss-release".
+    required: false
+    default: "sonatype-oss-release"
+  nexus-usr:
+    description: CIB seven Nexus username
+    required: true
+  nexus-psw:
+    description: CIB seven Nexus password
+    required: true
+  sonatype-central-portal-usr:
+    description: Sonatype Central Portal username
+    required: true
+  sonatype-central-portal-psw:
+    description: Sonatype Central Portal password (User Token)
+    required: true
+  maven-gpg-passphrase:
+    description: GPG passphrase used to unlock the signing key
+    required: true
+  maven-auto-release-after-close:
+    description: Flag indicating triggering of automatic release in Maven Central if the repository closure was successful.
+    required: true
+    default: "false"
+  github-token:
+    description: GitHub token
+    required: true
+  maven-build-options:
+    description: Any extra Maven options for the initial build process
+    required: false
+    default: ""
+  vulnerability-scan:
+    description: Vulnerability scanning using Aqua Security Trivy
+    required: false
+    default: "false"
+  branch:
+    description: Branch on which the new version numbers will be committed
+    required: false
+    default: ${{ github.event.repository.default_branch }}
+
+outputs:
+  artifacts_archive_path:
+    description: Filename of zipfile containing all files matched by artifacts-pattern.
+    value: ${{ steps.create-archive.outputs.filename }}
+
+runs:
+  using: composite
+  steps:
+    - name: Deploy to artifacts.cibseven.org only
+      if: inputs.deploy-to-artifacts == 'true' && inputs.deploy-to-maven-central == 'false'
+      env:
+        NEXUS_USR: ${{ inputs.nexus-usr }}
+        NEXUS_PSW: ${{ inputs.nexus-psw }}
+      shell: bash
+      run: |-
+        echo "::group::Deploy to artifacts.cibseven.org"
+        mvn -T4 -U -DskipTests clean deploy
+        echo "::endgroup::"
+
+    - name: Deploy to Maven Central (Release only)
+      if: inputs.deploy-to-maven-central == 'true'
+      env:
+        NEXUS_USR: ${{ inputs.nexus-usr }}
+        NEXUS_PSW: ${{ inputs.nexus-psw }}
+        MAVEN_GPG_PASSPHRASE: ${{ inputs.maven-gpg-passphrase }}
+      shell: bash
+      run: |-
+        echo "::group::Deploy to Maven Central"
+        # Check if version is SNAPSHOT
+        VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+        if [[ "$VERSION" == *-SNAPSHOT ]]; then
+          echo "::warning::Cannot deploy SNAPSHOT version to Maven Central"
+          exit 1
+        fi
+
+        # Get GPG key name
+        GPG_KEYNAME=$(gpg --list-keys --with-colons | grep pub | cut -d: -f5)
+
+        # Deploy to Maven Central
+        mvn -T4 -U \
+          -Dgpg.keyname="${GPG_KEYNAME}" \
+          -Dgpg.passphrase="${MAVEN_GPG_PASSPHRASE}" \
+          clean deploy \
+          -Psonatype-oss-release \
+          -Dskip.cibseven.release="${{ inputs.deploy-to-artifacts != 'true' }}"
+        echo "::endgroup::"
+
+    - name: Skip if manual deployment was selected
+      if: inputs.deploy-to-artifacts == 'true' || inputs.deploy-to-maven-central == 'true'
+      shell: bash
+      run: |-
+        echo "::notice::Skipping standard SNAPSHOT/Release deployment because manual deployment option was selected"
+        exit 0
+
+    - name: Check release profile for Maven Central
+      id: maven-central
+      shell: bash
+      env:
+        CENTRAL_RELEASE_PROFILE: ${{ inputs.central-release-profile }}
+        NEW_RELEASE_PROFILE_SINCE_V2: sonatype-oss-release
+        MAVEN_USR: ${{ inputs.maven-usr }}
+        MAVEN_PSW: ${{ inputs.maven-psw }}
+        SONATYPE_CENTRAL_PORTAL_USR: ${{ inputs.sonatype-central-portal-usr }}
+        SONATYPE_CENTRAL_PORTAL_PSW: ${{ inputs.sonatype-central-portal-psw }}
+      run: |-
+        # Retrieve all available Maven profiles from the current project
+        profiles=$(mvn help:all-profiles)
+
+        # Warn if the new profile is missing, user might be on an outdated parent POM
+        if ! echo "$profiles" | grep -q "$NEW_RELEASE_PROFILE_SINCE_V2"; then
+          echo "::warning::The Maven profile '$NEW_RELEASE_PROFILE_SINCE_V2' is not available. " \
+            "This suggests you are using an outdated parent POM."
+          echo "This new profile is required to support publishing via Sonatype's Central Portal " \
+            "(the new publishing interface for Maven Central)."
+          echo "Please upgrade your parent POM to the latest major version that includes this profile and refer to the documentation for migration guidance: " \
+            "https://github.com/camunda-community-hub/community/blob/main/maintainers-reviewers/RELEASE.MD#migration-to-sonatype-central-portal--how-to"
+        fi
+
+        {
+          echo release-profile="${CENTRAL_RELEASE_PROFILE}"
+          echo user="${SONATYPE_CENTRAL_PORTAL_USR}"
+          echo password="${SONATYPE_CENTRAL_PORTAL_PSW}"
+        } >> $GITHUB_OUTPUT
+
+    - name: Initialize
+      shell: bash
+      run: |-
+        echo "Repo: ${GITHUB_REPOSITORY}"
+        git config --global user.name "Release Bot"
+        git config --global user.email "actions@github.com"
+        test -n "${{inputs.community-deployment-activation}}" && echo 'COMMUNITY_ACTIVATION=-D${{inputs.community-deployment-activation}}' >> "$GITHUB_ENV"
+        test -n "${{steps.maven-central.outputs.release-profile}}" && echo 'CENTRAL_RELEASE_PROFILE=-P${{steps.maven-central.outputs.release-profile}}' >> "$GITHUB_ENV"
+        test -n "${{inputs.camunda-release-profile}}" && echo 'CAMUNDA_RELEASE_PROFILE=-P${{inputs.camunda-release-profile}}' >> "$GITHUB_ENV"
+        cp -v "${{ github.action_path }}/resources/settings.xml" "$HOME/.m2/"
+
+    - name: Run maven
+      shell: bash
+      run: |-
+        test -z "${{ inputs.run-tests }}" && SKIP_TESTS="-DskipTests"
+        mvn -B ${{ inputs.maven-additional-options }} ${{ inputs.maven-build-options }} package ${SKIP_TESTS}
+
+    - name: Archive Test Results on Failure
+      if: ${{ inputs.run-tests && failure() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results
+        path: target/surefire-reports/
+        retention-days: 7
+
+    - name: Publish Unit Test Results on Failure
+      if: ${{ inputs.run-tests && failure() }}
+      uses: EnricoMi/publish-unit-test-result-action@v2.3.0
+      with:
+        junit_files: target/surefire-reports/*.xml
+
+      ###########################################
+      # Download and install Trivy and template #
+      ###########################################
+    - name: Download and Install Trivy
+      shell: bash
+      run: |-
+        if [[ "${{ inputs.vulnerability-scan }}" == "true" ]];
+        then
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/master/contrib/install.sh | sh -s -- -b "${GITHUB_WORKSPACE}"
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/master/contrib/sarif.tpl -o sarif.tpl
+          ./trivy --version
+          ./trivy fs -t @sarif.tpl -f template -o trivy-results.sarif .
+
+          if [[ $(cat trivy-results.sarif | grep -E 'Severity: (HIGH|CRITICAL)' | wc -l) -gt 0 ]]; then
+            ./trivy fs .
+            exit 1
+          else
+            exit 0
+          fi
+        fi
+    - name: Upload SARIF file
+      shell: bash
+      run: |-
+        if [[ "${{ inputs.vulnerability-scan }}" == "true" ]];
+        then
+          COMPRESSED_SARIF=$(gzip -c trivy-results.sarif | base64 -w0)
+          curl \
+            -X POST \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "authorization: Bearer ${{ inputs.github-token }}" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/code-scanning/sarifs" \
+            -d '{"commit_sha":"${GITHUB_SHA}","ref":"${GITHUB_REF}","sarif": "${COMPRESSED_SARIF}"}' || true
+        fi
+    - name: Actions tagger
+      uses: Actions-R-Us/actions-tagger@latest
+      with:
+        publish_latest_tag: true
+
+    - name: Publish SNAPSHOT
+      if: inputs.deploy-to-artifacts == 'false' && inputs.deploy-to-maven-central == 'false'
+      env:
+        NEXUS_USR: ${{ inputs.nexus-usr}}
+        NEXUS_PSW: ${{ inputs.nexus-psw }}
+        MAVEN_USR: ${{ steps.maven-central.outputs.user }}
+        MAVEN_PSW: ${{ steps.maven-central.outputs.password }}
+        MAVEN_GPG_PASSPHRASE: ${{ inputs.maven-gpg-passphrase }}
+      shell: bash
+      run: |-
+        echo "::group::Publish SNAPSHOT"
+        test -n "${{ inputs.release-version }}" && echo "::debug::Not publishing SNAPSHOT because release-version is set" && exit 0
+
+        echo "Publish SNAPSHOT to CIB seven Artifactory activating deployment for community with ${{inputs.release-profile}}, ${{inputs.camunda-release-profile}}"
+        mvn -T4 -U --no-transfer-progress ${{ inputs.maven-additional-options }} -DskipTests ${{ inputs.maven-release-options }} \
+          ${COMMUNITY_ACTIVATION} ${CAMUNDA_RELEASE_PROFILE} deploy
+
+    - name: Publish Maven Release
+      if: inputs.deploy-to-artifacts == 'false' && inputs.deploy-to-maven-central == 'false'
+      env:
+        NEXUS_USR: ${{ inputs.nexus-usr}}
+        NEXUS_PSW: ${{ inputs.nexus-psw }}
+        MAVEN_USR: ${{ steps.maven-central.outputs.user }}
+        MAVEN_PSW: ${{ steps.maven-central.outputs.password }}
+        MAVEN_GPG_PASSPHRASE: ${{ inputs.maven-gpg-passphrase }}
+      shell: bash
+      run: |-
+        echo "::group::Publish RELEASE"
+        test -z "${{ inputs.release-version }}" && echo "::debug::Skipping Release because release-version is unset" && exit 0
+
+        echo "Set version to ${{ inputs.release-version }}"
+        mvn -B ${{ inputs.maven-additional-options }} versions:set org.codehaus.mojo:versions-maven-plugin:2.8.1:update-child-modules \
+         -DnewVersion=${{ inputs.release-version }}
+
+        echo "Deploy release to Camunda Repository using profiles ${{inputs.release-profile}}, ${{inputs.camunda-release-profile}}"
+        mvn -B --no-transfer-progress ${{ inputs.maven-additional-options }} -DskipTests ${{ inputs.maven-release-options }} \
+          ${RELEASE_PROFILE} ${CAMUNDA_RELEASE_PROFILE} deploy
+
+        # nexusUrl is ignored if the new `central-sonatype-publish` profile is used
+        # to be removed in @v3
+        echo "Deploy release to Maven Central using profiles ${{inputs.release-profile}}, ${{steps.maven-central.outputs.release-profile}}"
+        mvn -T4 -U --no-transfer-progress ${{ inputs.maven-additional-options }} -DskipTests ${{ inputs.maven-release-options }} \
+          -DautoReleaseAfterClose=${{ inputs.maven-auto-release-after-close }} \
+          -DnexusUrl="https://${{inputs.maven-url}}/" \
+          ${RELEASE_PROFILE} ${CENTRAL_RELEASE_PROFILE} deploy
+
+    - name: Prepare next development version
+      shell: bash
+      run: |-
+        ${{ github.action_path }}/resources/prepare-next-development-version.sh "${{ inputs.branch }}" "${{ inputs.release-version }}" "${{ inputs.maven-additional-options }}"
+
+    - name: Archive artifacts
+      id: create-archive
+      shell: bash
+      run: |-
+        test -z "${{ inputs.artifacts-pattern }}" && echo "::debug::Skipping archiving because artifacts-pattern is unset" && exit 0
+        # Filename: [repo without org]-[version].zip
+        ZIPFILE="${GITHUB_REPOSITORY#*/}-${{ inputs.release-version }}.zip"
+        # shellcheck disable=SC2046
+        zip "$ZIPFILE" $(find . -path ${{ inputs.artifacts-pattern }})
+        echo "filename=${ZIPFILE}" >> "$GITHUB_OUTPUT"

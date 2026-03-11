@@ -85,7 +85,7 @@ runs:
         mvn -B ${{ inputs.maven-additional-options }} ${{ inputs.maven-build-options }} package ${SKIP_TESTS}
 
     - name: Archive Test Results on Failure
-      if: ${{+ && failure() }}
+      if: ${{ inputs.run-tests && failure() }}
       uses: actions/upload-artifact@v4
       with:
         name: test-results
