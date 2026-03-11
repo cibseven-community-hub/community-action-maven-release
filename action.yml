@@ -86,6 +86,20 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Initialize
+      shell: bash
+      env:
+        NEXUS_USR: ${{ inputs.nexus-usr }}
+        NEXUS_PSW: ${{ inputs.nexus-psw }}
+        SONATYPE_USR: ${{ inputs.sonatype-central-portal-usr }}
+        SONATYPE_PSW: ${{ inputs.sonatype-central-portal-psw }}
+      run: |-
+        echo "Repo: ${GITHUB_REPOSITORY}"
+        git config --global user.name "Release Bot"
+        git config --global user.email "actions@github.com"
+        mkdir -p "$HOME/.m2"
+        cp -v "${{ github.action_path }}/resources/settings.xml" "$HOME/.m2/"
+
     - name: Build
       shell: bash
       run: |-
