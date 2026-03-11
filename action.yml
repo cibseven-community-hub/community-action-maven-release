@@ -3,6 +3,14 @@ name: Release CIB seven Community Project on Maven Central
 description: Encapsulates the release process of CIB seven community extensions
 
 inputs:
+  deploy-to-artifacts:
+    description: Deploy to artifacts.cibseven.org
+    required: false
+    default: false
+  deploy-to-maven-central:
+    description: Deploy artifacts to Maven Central
+    required: false
+    default: false
   artifacts-pattern:
     description: Which artifacts to store. Set to empty string to disable
     required: false
