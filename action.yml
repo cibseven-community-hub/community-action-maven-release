@@ -169,7 +169,7 @@ runs:
 
     # Create "latest" tag only in release context 
     - name: Actions tagger
-      if: inputs.deploy-to-maven-central == 'true'
+      if: inputs.deploy-to-maven-central == 'true' || github.event.release
       uses: Actions-R-Us/actions-tagger@latest
       with:
         publish_latest_tag: true
@@ -225,7 +225,7 @@ runs:
 
     # Zipped artifacts to be used by upload-release-asset in the workflow calling this action
     - name: Archive artifacts
-      if: github.event.release || github.event.release
+      if: github.event.release
       id: create-archive
       shell: bash
       run: |-
