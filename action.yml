@@ -16,7 +16,7 @@ inputs:
     required: false
     default: ./target/nexus-staging/**/*.jar
   run-tests:
-    default: ""
+    default: "true"
     required: false
     description: Wether to explicitly run maven tests prior to releasing
   maven-additional-options:
@@ -102,20 +102,33 @@ runs:
 
     - name: Build
       shell: bash
-      run: |-
-        test -z "${{ inputs.run-tests }}" && SKIP_TESTS="-DskipTests"
-        mvn -B ${{ inputs.maven-additional-options }} ${{ inputs.maven-build-options }} package ${SKIP_TESTS}
+      run: |
+        mvn -B -T4 \
+          -Dbuild.number=${GITHUB_RUN_NUMBER} \
+          ${{ inputs.maven-additional-options }} \
+          ${{ inputs.maven-build-options }} \
+          clean install -DskipTests
 
+    - name: Run Tests
+      if: ${{ inputs.run-tests == 'true' }}
+      shell: bash
+      env:
+        DOCKER_HOST: tcp://localhost:2375
+      run: |
+        mvn -B \
+          -Dbuild.number=${GITHUB_RUN_NUMBER} \
+          test
+      # Note: we want failure() to be true if tests fail
+      #    -Dmaven.test.failure.ignore=true
     - name: Archive Test Results on Failure
-      if: ${{ inputs.run-tests && failure() }}
+      if: ${{ inputs.run-tests == 'true' && failure() }}
       uses: actions/upload-artifact@v4
       with:
         name: test-results
         path: target/surefire-reports/
         retention-days: 7
-
     - name: Publish Unit Test Results on Failure
-      if: ${{ inputs.run-tests && failure() }}
+      if: ${{ inputs.run-tests == 'true' && failure() }}
       uses: EnricoMi/publish-unit-test-result-action@v2.3.0
       with:
         junit_files: target/surefire-reports/*.xml
