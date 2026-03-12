@@ -166,14 +166,17 @@ runs:
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/code-scanning/sarifs" \
             -d '{"commit_sha":"${GITHUB_SHA}","ref":"${GITHUB_REF}","sarif": "${COMPRESSED_SARIF}"}' || true
         fi
+
+    # Create "latest" tag only in release context 
     - name: Actions tagger
+      if: inputs.deploy-to-maven-central == 'true'
       uses: Actions-R-Us/actions-tagger@latest
       with:
         publish_latest_tag: true
 
     
     - name: Deploy to artifacts.cibseven.org only
-      if: inputs.deploy-to-artifacts == 'true' && inputs.deploy-to-maven-central == 'false'
+      if: inputs.deploy-to-artifacts == 'true' && (inputs.deploy-to-maven-central == 'false' && !github.event.release)
       env:
         NEXUS_USR: ${{ inputs.nexus-usr }}
         NEXUS_PSW: ${{ inputs.nexus-psw }}
@@ -184,7 +187,7 @@ runs:
         echo "::endgroup::"
 
     - name: Deploy to Maven Central (Release only)
-      if: inputs.deploy-to-maven-central == 'true'
+      if: inputs.deploy-to-maven-central == 'true' || github.event.release
       env:
         NEXUS_USR: ${{ inputs.nexus-usr }}
         NEXUS_PSW: ${{ inputs.nexus-psw }}
@@ -211,19 +214,18 @@ runs:
           -Dskip.cibseven.release="${{ inputs.deploy-to-artifacts != 'true' }}"
         echo "::endgroup::"
 
-    - name: Skip if manual deployment was selected
-      if: inputs.deploy-to-artifacts == 'true' || inputs.deploy-to-maven-central == 'true'
-      shell: bash
-      run: |-
-        echo "::notice::Skipping standard SNAPSHOT/Release deployment because manual deployment option was selected"
-        exit 0 
-
+    # Main branch moves to the new snapshot version; release tags point to the released commit.
     - name: Prepare next development version
+      if: inputs.deploy-to-maven-central == 'true' || github.event.release
+      # Note: it's a good practice to set release-version: ${{ github.event.release.tag_name }} as input,
+      # so if there is no release context, it'll be empty and the script will not run
       shell: bash
       run: |-
         ${{ github.action_path }}/resources/prepare-next-development-version.sh "${{ inputs.branch }}" "${{ inputs.release-version }}" "${{ inputs.maven-additional-options }}"
 
+    # Zipped artifacts to be used by upload-release-asset in the workflow calling this action
     - name: Archive artifacts
+      if: github.event.release || github.event.release
       id: create-archive
       shell: bash
       run: |-
