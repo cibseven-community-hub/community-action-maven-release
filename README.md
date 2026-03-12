@@ -1,8 +1,8 @@
 [![Lifecycle: Incubating](https://img.shields.io/badge/Lifecycle-Incubating-blue)](https://github.com/Camunda-Community-Hub/community/blob/main/extension-lifecycle.md#incubating-)
 
-# GitHub Action to build and release Camunda Community Extensions
+# GitHub Action to build and release CIB seven Community Extensions
 
-The community-action-maven-release helps you building and deploying Maven projects to the Camunda Artifactory and Maven Central.
+The community-action-maven-release helps you building and deploying Maven projects to the CIB seven Artifactory and Maven Central.
 
 More information can be found in the [release documentation](https://github.com/camunda-community-hub/community/blob/main/RELEASE.MD).
 
@@ -14,12 +14,12 @@ Before doing any release, you will need to register your repository by opening a
 
 ## Add release parent to POM
 
-Any project needs to use the [community-hub-release-parent](https://github.com/camunda-community-hub/community-hub-release-parent) in their POM:
+Any project needs to use the [community-hub-release-parent](https://github.com/cibseven-community-hub/release-parent) in their POM:
 
 ```xml
 <parent>
-    <groupId>org.camunda.community</groupId>
-    <artifactId>community-hub-release-parent</artifactId>
+    <groupId>org.cibseven.community</groupId>
+    <artifactId>release-parent</artifactId>
     <version><!-- Use the newest version available! --></version>
 </parent>
 ```
@@ -30,7 +30,7 @@ This parent POM contains all necessary settings for the GitHub action to functio
 
 Add a GitHub workflow (e.g. by adding a file `.github/workflows/deploy.yaml`) to your project.
 
-Important configuration options (see https://github.com/camunda-community-hub/community-action-maven-release/blob/main/action.yml#L3 for all options):
+Important configuration options (see https://github.com/cibseven-community-hub/community-action-maven-release/blob/main/action.yml#L3 for all options):
 
 - **Sonatype Server & Credentials:**
 
@@ -40,7 +40,7 @@ You need to provide the following username and password (same for all groupId):
           sonatype-central-portal-psw: ${{ secrets.COMMUNITY_HUB_MAVEN_CENTRAL_CP_PSW }}
 
 > [!TIP]
-> Hint: Most Community Hub projects are in the `org.camunda.community` groupID.
+> Hint: Most Community Hub projects are in the `org.cibseven.community` groupID.
 
 - **Branch:** If you want to support multiple versions and have different branches for managing those, you can configure them in the action: `branch: ${{ github.event.release.target_commitish || github.ref_name }}`
 
@@ -78,8 +78,6 @@ jobs:
           release-version: ${{ github.event.release.tag_name }}
           nexus-usr: ${{ secrets.NEXUS_USR }}
           nexus-psw: ${{ secrets.NEXUS_PSW }}
-          sonatype-central-portal-usr: ${{ secrets.COMMUNITY_HUB_MAVEN_CENTRAL_CP_USR }}
-          sonatype-central-portal-psw: ${{ secrets.COMMUNITY_HUB_MAVEN_CENTRAL_CP_PSW }}
           maven-gpg-passphrase: ${{ secrets.MAVEN_CENTRAL_GPG_SIGNING_KEY_PASSPHRASE }}
           maven-auto-release-after-close: true
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -146,6 +144,6 @@ In order to release a new version:
 
 # Troubleshooting
 
-1. If you are facing any issues regarding your extension's release process, please [open an issue](https://github.com/camunda-community-hub/community-action-maven-release/issues) and assign it to [@camunda-community-hub/devrel](https://github.com/orgs/camunda-community-hub/teams/devrel) with applicable issue labels applied.
+1. If you are facing any issues regarding your extension's release process, please [open an issue](https://github.com/cibseven-community-hub/community-action-maven-release/issues) and assign it to [@camunda-community-hub/devrel](https://github.com/orgs/camunda-community-hub/teams/devrel) with applicable issue labels applied.
 2. If you see an update or improvement that can be made to the release process in the Camunda Community Hub, we encourage you to submit an issue with your request, and thank you for your suggestion!
 3. Please make use of the [Camunda Community Hub Pull Request Template](https://github.com/camunda-community-hub/community/issues/new?assignees=&labels=&template=camunda-community-hub-pull-request-template.md&title=Pull+Request) when opening a troubleshooting pull request and include as much information as possible in order to help reviewers better understand the issue you are facing.
