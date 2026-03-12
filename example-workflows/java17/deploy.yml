@@ -1,0 +1,58 @@
+name: Deploy artifacts with Maven
+on:
+  push:
+    branches:
+    - main
+    - release/**
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      deploy_to_artifacts:
+        description: 'Deploy to artifacts.cibseven.org'
+        type: boolean
+        required: false
+        default: false
+      deploy_to_maven_central:
+        description: 'Deploy artifacts to Maven Central'
+        type: boolean
+        required: false
+        default: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+      - name: Set up Java environment
+        uses: actions/setup-java@v4
+        with:
+          java-version: 17
+          distribution: temurin
+          cache: maven
+          gpg-private-key: ${{ secrets.MAVEN_CENTRAL_GPG_SIGNING_KEY_SEC }}
+          gpg-passphrase: MAVEN_CENTRAL_GPG_PASSPHRASE
+      - name: Deploy SNAPSHOT / Release
+        uses: cibseven-community-hub/community-action-maven-release@cibseven-action-maven-release
+        with:
+          # release-version empty if no release context
+          release-version: ${{ github.event.release.tag_name }}
+          deploy-to-artifacts: ${{ inputs.deploy_to_artifacts }}
+          deploy-to-maven-central: ${{ inputs.deploy_to_maven_central }}
+          nexus-usr: ${{ secrets.NEXUS_USR }}
+          nexus-psw: ${{ secrets.NEXUS_PSW }}
+          maven-gpg-passphrase: ${{ secrets.MAVEN_CENTRAL_GPG_SIGNING_KEY_PASSPHRASE }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ${{ github.event.release.target_commitish || github.ref_name }}
+        id: release
+      # Upload archived artifacts as Github assets
+      - if: github.event.release
+        name: Attach artifacts to GitHub Release (Release only)
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ${{ steps.release.outputs.artifacts_archive_path }}
+          asset_name: ${{ steps.release.outputs.artifacts_archive_path }}
+          asset_content_type: application/zip
